@@ -26,11 +26,12 @@ let
     # inherit (unstable) citrix_receiver;
 
     # citrix_receiver = callPackage pkgs/citrix-receiver {};
+    arandr = callPackage pkgs/arandr { };
 
-    premake5 = callPackage pkgs/premake5 {};
-    otfcc = callPackage pkgs/otfcc { inherit premake5; };
-    iosevka = callPackage pkgs/iosevka { inherit otfcc; };
-    imposevka = callPackage pkgs/iosevka/imposevka.nix { inherit otfcc; };
+    # premake5 = callPackage pkgs/premake5 {};
+    # otfcc = callPackage pkgs/otfcc { inherit premake5; };
+    # iosevka = callPackage pkgs/iosevka { inherit otfcc; };
+    # imposevka = callPackage pkgs/iosevka/imposevka.nix { inherit otfcc; };
 
     freetype_subpixel = pkgs.freetype.override {
       useEncumberedCode = true;

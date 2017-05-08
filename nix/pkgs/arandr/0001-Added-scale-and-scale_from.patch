@@ -1,0 +1,284 @@
+From dd8444b396c33a1aec1d9076389224c60315c2cc Mon Sep 17 00:00:00 2001
+From: maximilianhuber <maximilian.huber@tngtech.com>
+Date: Mon, 8 May 2017 13:17:04 +0200
+Subject: [PATCH] Added scale and scale_from
+
+stolen from https://alioth.debian.org/tracker/?group_id=100834&atid=413123&func=detail&aid=314086
+---
+ screenlayout/auxiliary.py | 37 ++++++++++++++++++++++++++++---
+ screenlayout/widget.py    | 32 ++++++++++++++++++++++++---
+ screenlayout/xrandr.py    | 55 ++++++++++++++++++++++++++++++++++++++++++-----
+ 3 files changed, 113 insertions(+), 11 deletions(-)
+
+diff --git a/screenlayout/auxiliary.py b/screenlayout/auxiliary.py
+index 0e0faa7..7f53207 100644
+--- a/screenlayout/auxiliary.py
++++ b/screenlayout/auxiliary.py
+@@ -1,16 +1,16 @@
+ # ARandR -- Another XRandR GUI
+ # Copyright (C) 2008 -- 2011 chrysn <chrysn@fsfe.org>
+-# 
++#
+ # This program is free software: you can redistribute it and/or modify
+ # it under the terms of the GNU General Public License as published by
+ # the Free Software Foundation, either version 3 of the License, or
+ # (at your option) any later version.
+-# 
++#
+ # This program is distributed in the hope that it will be useful,
+ # but WITHOUT ANY WARRANTY; without even the implied warranty of
+ # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ # GNU General Public License for more details.
+-# 
++#
+ # You should have received a copy of the GNU General Public License
+ # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 
+@@ -96,6 +96,37 @@ class Position(tuple):
+     def __str__(self):
+         return "%dx%d"%self
+ 
++class Scale(tuple):
++    """2-tuple of left and top that can be created from a '<x-scale>x<y-scale>' string"""
++    def __new__(cls, arg):
++        if isinstance(arg, basestring):
++            arg = [float(x) for x in arg.split("x")]
++        arg = tuple(arg)
++        assert len(arg)==2
++        return super(Scale, cls).__new__(cls, arg)
++
++    xscale = property(lambda self:self[0])
++    yscale = property(lambda self:self[1])
++
++    def __str__(self):
++        return "%dx%d"%self
++
++class ScaleFrom(tuple):
++    """2-tuple of left and top that can be created from a '<x-scale>x<y-scale>' string"""
++    def __new__(cls, arg):
++        if isinstance(arg, basestring):
++            arg = [int(x) for x in arg.split("x")]
++        arg = tuple(arg)
++        assert len(arg)==2
++        return super(ScaleFrom, cls).__new__(cls, arg)
++
++    xscalefrom = property(lambda self:self[0])
++    yscalefrom = property(lambda self:self[1])
++
++    def __str__(self):
++
++        return "%dx%d"%self
++
+ class Geometry(tuple):
+     """4-tuple of width, height, left and top that can be created from an XParseGeometry style string"""
+     # FIXME: use XParseGeometry instead of an own incomplete implementation
+diff --git a/screenlayout/widget.py b/screenlayout/widget.py
+index de469e9..42674eb 100644
+--- a/screenlayout/widget.py
++++ b/screenlayout/widget.py
+@@ -1,16 +1,16 @@
+ # ARandR -- Another XRandR GUI
+ # Copyright (C) 2008 -- 2011 chrysn <chrysn@fsfe.org>
+-# 
++#
+ # This program is free software: you can redistribute it and/or modify
+ # it under the terms of the GNU General Public License as published by
+ # the Free Software Foundation, either version 3 of the License, or
+ # (at your option) any later version.
+-# 
++#
+ # This program is distributed in the hope that it will be useful,
+ # but WITHOUT ANY WARRANTY; without even the implied warranty of
+ # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ # GNU General Public License for more details.
+-# 
++#
+ # You should have received a copy of the GNU General Public License
+ # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 
+@@ -133,6 +133,8 @@ class ARandRWidget(gtk.DrawingArea):
+         self._set_something('rotation', on, rot)
+     def set_resolution(self, on, res):
+         self._set_something('mode', on, res)
++    def set_scale_from(self, on, scale_from):
++        self._set_something('scale_from', on, scale_from)
+ 
+     def set_primary(self, on, primary):
+         o = self._xrandr.configuration.outputs[on]
+@@ -338,6 +340,7 @@ class ARandRWidget(gtk.DrawingArea):
+                 m.add(primary)
+ 
+             res_m = gtk.Menu()
++            scale_from_m = gtk.Menu()
+             for r in os.modes:
+                 i = gtk.CheckMenuItem(str(r))
+                 i.props.draw_as_radio = True
+@@ -350,6 +353,23 @@ class ARandRWidget(gtk.DrawingArea):
+                 i.connect('activate', _res_set, on, r)
+                 res_m.add(i)
+ 
++            # Get from other screen
++            try:
++                other_config = [k for (k,v) in self._xrandr.configuration.outputs.items() if k != on and v.active][0]
++                for r in self._xrandr.state.outputs[other_config].modes:
++                    i = gtk.CheckMenuItem(str(r))
++                    i.props.draw_as_radio = True
++                    #i.props.active = (oc.mode.name == r.name)
++                    def _scale_from_set(menuitem, on, r):
++                        try:
++                            self.set_scale_from(on, r)
++                        except InadequateConfiguration, e:
++                            self.error_message(_("Setting this resolution is not possible here: %s")%e.message)
++                    i.connect('activate', _scale_from_set, on, r)
++                    scale_from_m.add(i)
++            except:
++                raise
++
+             or_m = gtk.Menu()
+             for r in ROTATIONS:
+                 i = gtk.CheckMenuItem("%s"%r)
+@@ -373,6 +393,12 @@ class ARandRWidget(gtk.DrawingArea):
+             m.add(res_i)
+             m.add(or_i)
+ 
++            # Add scale-from
++            #from IPython import embed; embed()
++            scale_from_i = gtk.MenuItem(_("Scale from"))
++            scale_from_i.props.submenu = scale_from_m
++            m.add(scale_from_i)
++
+         m.show_all()
+         return m
+ 
+diff --git a/screenlayout/xrandr.py b/screenlayout/xrandr.py
+index 41f0fe1..331c7a1 100644
+--- a/screenlayout/xrandr.py
++++ b/screenlayout/xrandr.py
+@@ -125,6 +125,16 @@ class XRandR(object):
+                         if p[1] not in ROTATIONS:
+                             raise FileSyntaxError()
+                         o.rotation = Rotation(p[1])
++                    elif p[0] == '--scale':
++                        try:
++                            scale = float(p[1])
++                        except:
++                            raise FileSyntaxError()
++                        o.scale = Scale(scale)
++                    elif p[0] == '--scale-from':
++                        if not re.match(r'\d+x\d+', p[1]):
++                            raise FileSyntaxError()
++                        o.scale = ScaleFrom(p[1])
+                     else:
+                         raise FileSyntaxError()
+                 o.active = True
+@@ -137,10 +147,14 @@ class XRandR(object):
+ 
+         self._load_parse_screenline(screenline)
+ 
+-        for headline,details in items:
++        #from IPython import embed; embed()
++        for headline,details, transform in items:
++            scale_from = None
++            scale = None
+             if headline.startswith("  "): continue # a currently disconnected part of the screen i can't currently get any info out of
+             if headline == "": continue # noise
+ 
++
+             headline = headline.replace('unknown connection', 'unknown-connection')
+             hsplit = headline.split(" ")
+             o = self.state.Output(hsplit[0])
+@@ -161,6 +175,11 @@ class XRandR(object):
+ 
+                 modeid = hsplit[3].strip("()")
+ 
++                # scale and scale_from
++                if transform:
++                    if transform[0] != ['1.000000', '0.000000', '0.000000']:
++                        scale = "%sx%s" % (transform[0][0], transform[1][1])
++
+                 if hsplit[4] in ROTATIONS: rotation = Rotation(hsplit[4])
+                 else: rotation = NORMAL
+             else:
+@@ -168,6 +187,8 @@ class XRandR(object):
+                 geometry = None
+                 modeid = None
+                 rotation = None
++                scale = None
++                scale_from = None
+ 
+             o.rotations = set()
+             for r in ROTATIONS:
+@@ -197,18 +218,28 @@ class XRandR(object):
+                     o.modes.append(NamedSize(r, name=n))
+ 
+             self.state.outputs[o.name] = o
+-            self.configuration.outputs[o.name] = self.configuration.OutputConfiguration(active, primary, geometry, rotation, currentname)
++            self.configuration.outputs[o.name] = self.configuration.OutputConfiguration(active, primary, geometry, rotation, currentname, scale, scale_from)
+ 
+     def _load_raw_lines(self):
+         output = self._output("--verbose")
+         items = []
+         screenline = None
++        transform = 0
+         for l in output.split('\n'):
+             if l.startswith("Screen "):
+                 assert screenline is None
+                 screenline = l
++            elif l.startswith('\tTransform:'):
++                items[-1][-1].append(l.split(' ')[2:])
++                transform = 1
+             elif l.startswith('\t'):
+-                continue
++                if transform and transform < 3:
++                    transform += 1
++                    items[-1][-1].append(l.strip().split(' '))
++                    if transform == 3:
++                        transform = 0
++                else:
++                    continue
+             elif l.startswith(2*' '): # [mode, width, height]
+                 l = l.strip()
+                 if reduce(bool.__or__, [l.startswith(x+':') for x in "hv"]):
+@@ -217,7 +248,7 @@ class XRandR(object):
+                 else: # mode
+                     items[-1][1].append([l.split()])
+             else:
+-                items.append([l, []])
++                items.append([l, [], []])
+         return screenline, items
+ 
+     def _load_parse_screenline(self, screenline):
+@@ -327,15 +358,29 @@ class XRandR(object):
+                     args.append(str(o.position))
+                     args.append("--rotate")
+                     args.append(o.rotation)
++                    if o.scale is not None:
++                        args.append("--scale")
++                        args.append(str(o.scale))
++                    if o.scale_from is not None:
++                        args.append("--scale-from")
++                        args.append(str(o.scale_from))
+             return args
+ 
+         class OutputConfiguration(object):
+-            def __init__(self, active, primary, geometry, rotation, modename):
++            def __init__(self, active, primary, geometry, rotation, modename, scale, scale_from):
+                 self.active = active
+                 self.primary = primary
+                 if active:
+                     self.position = geometry.position
+                     self.rotation = rotation
++                    if scale is not None:
++                        self.scale = Scale(scale)
++                    else:
++                        self.scale = None
++                    if scale_from is not None:
++                        self.scale_from= ScaleFrom(scale_from)
++                    else:
++                        self.scale_from = None
+                     if rotation.is_odd:
+                         self.mode = NamedSize(Size(reversed(geometry.size)), name=modename)
+                     else:
+-- 
+2.12.2
+
