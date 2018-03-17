@@ -20,22 +20,23 @@
 --
 -- Last modified: Sa Jul 23, 2016  02:15
 {-# OPTIONS_GHC -W -fwarn-unused-imports -fno-warn-missing-signatures #-}
+{-# LANGUAGE CPP #-}
 
 ------------------------------------------------------------------------
 -- Imports:
-import           Data.Monoid
 import           Data.Foldable (foldMap)
-import           Control.Monad
+import           Data.Ratio ((%))
 import           System.Exit ( exitSuccess )
 import           System.IO ( hPutStrLn )
 import           XMonad
 import           Graphics.X11.ExtraTypes.XF86()
 
-import           XMonad.Prompt ( defaultXPConfig )
-import           XMonad.Prompt.Shell ( shellPrompt )
+--------------------------------------------------------------------------------
+-- Prompt
 
+--------------------------------------------------------------------------------
+-- Hooks
 import           XMonad.Hooks.DynamicLog ( dynamicLogWithPP
-                                         , xmobarPP , defaultPP
                                          , PP(..)
                                          , xmobarColor
                                          , wrap )
@@ -44,15 +45,18 @@ import           XMonad.Hooks.ManageDocks ( avoidStrutsOn
                                           , manageDocks
                                           , docksEventHook
                                           , ToggleStruts(..) )
-import           XMonad.Hooks.ManageHelpers ( doFullFloat
-                                            , doCenterFloat )
+import           XMonad.Hooks.ManageHelpers ( doCenterFloat )
 import           XMonad.Hooks.UrgencyHook ( withUrgencyHook
-                                          , NoUrgencyHook(..) )
+                                          , focusUrgent )
 import           XMonad.Hooks.SetWMName ( setWMName )
 
-import           XMonad.Util.Run ( spawnPipe )
+--------------------------------------------------------------------------------
+-- Util
+import           XMonad.Util.Run ( runProcessWithInput, spawnPipe )
 import           XMonad.Util.Types ( Direction2D(..) )
 
+--------------------------------------------------------------------------------
+-- Actions
 import           XMonad.Actions.CycleWS ( nextWS, prevWS
                                         , toggleWS'
                                         , shiftToNext, shiftToPrev
@@ -60,45 +64,40 @@ import           XMonad.Actions.CycleWS ( nextWS, prevWS
                                         , shiftNextScreen, shiftPrevScreen
                                         , moveTo
                                         , Direction1D(..)
-                                        , WSType( NonEmptyWS )
-                                        , skipTags )
+                                        , WSType( NonEmptyWS ) )
 import           XMonad.Actions.UpdatePointer ( updatePointer )
 import           XMonad.Actions.GridSelect
+import           XMonad.Actions.WindowGo ( runOrRaiseNext, raiseNext )
 
+--------------------------------------------------------------------------------
+-- Layouts
 import           XMonad.Layout.BoringWindows( boringAuto
                                             , focusDown )
+import           XMonad.Layout.Gaps (gaps)
 import           XMonad.Layout.Named ( named )
 import           XMonad.Layout.NoBorders ( smartBorders )
 import           XMonad.Layout.Minimize ( minimize, minimizeWindow
                                         , MinimizeMsg(RestoreNextMinimizedWin) )
-import           XMonad.Layout.PerWorkspace ( onWorkspace, onWorkspaces, modWorkspace, modWorkspaces )
+import           XMonad.Layout.MultiToggle
+import           XMonad.Layout.MultiToggle.Instances
+import           XMonad.Layout.PerScreen (ifWider)
+import           XMonad.Layout.PerWorkspace ( modWorkspaces )
 import           XMonad.Layout.ResizableTile ( ResizableTall(ResizableTall)
                                              , MirrorResize ( MirrorShrink
                                                             , MirrorExpand ) )
-import           XMonad.Layout.Simplest ( Simplest(Simplest) )
--- import           XMonad.Layout.SubLayouts ( subLayout
---                                           , pullGroup
---                                           , GroupMsg( MergeAll, UnMerge ) )
-import           XMonad.Layout.Tabbed ( addTabs
-                                      , shrinkText
-                                      , tabbedBottom
-                                      , Theme(..) )
-import           XMonad.Layout.Magnifier (magnifiercz)
-import           XMonad.Layout.MultiToggle
-import           XMonad.Layout.MultiToggle.Instances
-import           XMonad.Layout.Master (mastered)
--- testing layouts:
+import           XMonad.Layout.Spacing (spacing)
 import           XMonad.Layout.TwoPane (TwoPane(TwoPane))
-import           XMonad.Layout.IfMax (IfMax(IfMax), ifMax)
-import           XMonad.Layout.Spacing
-import           XMonad.Layout.Gaps -- testing
-import           XMonad.Layout.PerScreen -- testing
--- import           XMonad.Layout.Grid -- testing
--- import           XMonad.Layout.WorkspaceDir
+import           XMonad.Layout.IM -- (withIM)
 
+import           XMonad.Layout.IfMax
+
+--------------------------------------------------------------------------------
+-- misc
 import qualified Data.Map                    as M
 import qualified XMonad.StackSet             as W
 
+--------------------------------------------------------------------------------
+-- MyConfig
 import XMonad.MyConfig.Utils
 import XMonad.MyConfig.Common
 import XMonad.MyConfig.Scratchpads
@@ -116,31 +115,32 @@ myKeys conf@XConfig {XMonad.modMask = modm} =
     ++ baclightControlKBs
     ++ layoutKBs
     ++ systemctlKBs
-    -- ++ mpdKBs
   where
     basicKBs =
       [ ((ms_            , xK_Return), spawn $ XMonad.terminal conf)
       , ((msc, xK_Return), spawn "urxvtd -q -f -o &")
-      -- , ((m__, xK_Return), windows W.swapMaster)
+#if 1
       , ((m4m, xK_Return), windows W.swapMaster)
-      -- , ((m__, xK_g     ), spawn "~/bin/emc || emacs")
-      , ((m__, xK_q     ), spawn "xmonad --recompile && sleep 0.1 && xmonad --restart") -- Restart xmonad
-      , ((msc, xK_q     ), io exitSuccess) -- Quit xmonad
-      -- , ((m__, xK_p     ), spawn "`dmenu_run`")
+#else
+      , ((m__, xK_Return), windows W.swapMaster)
+#endif
+      , ((m__, xK_q     ), spawn "xmonad --restart")
+      , ((ms_, xK_q     ), spawn "xmonad --recompile && sleep 0.1 && xmonad --restart")
+      , ((msc, xK_q     ), io exitSuccess)
       , ((m__, xK_p     ), spawn "`dmenu_path | yeganesh`")
-      , ((m__, xK_x     ), shellPrompt defaultXPConfig)
-      -- , ((ms_, xK_x     ), changeDir def)
+      -- , ((m__, xK_x     ), shellPrompt defaultXPConfig)
 
 
-      , ((ms_, xK_c     ), kill) -- close focused window
+      , ((ms_, xK_c     ), kill)
 
-      , ((m__, xK_Tab   ), windows W.focusDown) -- Move focus to the next window
-      , ((ms_, xK_Tab   ), focusDown) -- Move focus to the next window using BoringWindows
+      , ((m__, xK_Tab   ), windows W.focusDown)
+      , ((ms_, xK_Tab   ), focusDown)
+      , ((m__, xK_u     ), focusUrgent)
 
-      , ((m__, xK_j     ), windows W.focusDown) -- Move focus to the next window
-      , ((m__, xK_k     ), windows W.focusUp  ) -- Move focus to the previous window
-      , ((ms_, xK_j     ), windows W.swapDown  ) -- Swap the focused window with the next window
-      , ((ms_, xK_k     ), windows W.swapUp    ) -- Swap the focused window with the previous window
+      , ((m__, xK_j     ), windows W.focusDown)
+      , ((m__, xK_k     ), windows W.focusUp)
+      , ((ms_, xK_j     ), windows W.swapDown)
+      , ((ms_, xK_k     ), windows W.swapUp)
       , ((m__, xK_o     ), spawn "urxvtc -e bash -c 'EDITOR=vim ranger'")
       , ((m_c, xK_Return), spawn "urxvtc -e zsh -c 'ssh vserver'")
       , ((ms_, xK_p     ), spawn "passmenu")]
@@ -162,16 +162,16 @@ myKeys conf@XConfig {XMonad.modMask = modm} =
               , (f, m) <- [(W.view, 0), (W.shift, shiftMask)]]
          -}
     layoutKBs =
-      [ ((m__, xK_space ), sendMessage NextLayout) -- Rotate through the available layout algorithms
+      [ ((m__, xK_space ), sendMessage NextLayout)
       , ((ms_, xK_x     ), sendMessage $ Toggle MIRROR)
       , ((m__, xK_f     ), sendMessage $ Toggle FULL)
-      , ((ms_, xK_space ), setLayout $ XMonad.layoutHook conf) --  Reset the layouts on the current workspace to default
+      , ((ms_, xK_space ), setLayout $ XMonad.layoutHook conf)
       , ((m__, xK_m     ), withFocused minimizeWindow)
       , ((ms_, xK_m     ), sendMessage RestoreNextMinimizedWin)
 
       , ((m__, xK_t     ), withFocused $ windows . W.sink) -- Push window back into tiling
-      , ((m__, xK_comma ), sendMessage (IncMasterN 1)) -- Increment the number of windows in the master area
-      , ((m__, xK_period), sendMessage (IncMasterN (-1))) -- Deincrement the number of windows in the master area
+      , ((m__, xK_comma ), sendMessage (IncMasterN 1))
+      , ((m__, xK_period), sendMessage (IncMasterN (-1)))
 
       -- Shrink and Expand
       , ((m__, xK_h     ), sendMessage Shrink)
@@ -181,6 +181,11 @@ myKeys conf@XConfig {XMonad.modMask = modm} =
 
       , ((m__, xK_b     ), sendMessage ToggleStruts)]
       ++ cycleWSKBs
+      ++ map (\(a,b) -> (a,b >> popupCurDesktop))
+           [ ((m__, xK_i), runOrRaiseNext "firefox" (className =? "Firefox" <||> className =?  "chromium-browser" <||> className =? "Chromium-browser"))
+           , ((m__, 0xfc), runOrRaiseNext "~/bin/ec" (className =? "Emacs"))
+           , ((m__, 0xf6), raiseNext (className =? "jetbrains-phpstorm" <||> className =? "jetbrains-idea"))
+           ]
       -- ++ combineTwoKBs
       -- ++ subLayoutKBs
       where
@@ -189,14 +194,17 @@ myKeys conf@XConfig {XMonad.modMask = modm} =
           , ((m__, xK_Up   ), moveTo Prev NonEmptyWS) -- HiddenNonEmptyWS
           , ((ms_, xK_Down ), shiftToNext >> nextWS)
           , ((ms_, xK_Up   ), shiftToPrev >> prevWS)
-          -- , ((m__, xK_Right), nextScreen)
-          -- , ((m__, xK_Left ), prevScreen)
-          -- , ((ms_, xK_Right), shiftNextScreen)
-          -- , ((ms_, xK_Left ), shiftPrevScreen)
+#if 1
           , ((m__, xK_Left ), nextScreen)
+          , ((m__, xK_Right), prevScreen)
           , ((ms_, xK_Left ), shiftNextScreen)
           , ((ms_, xK_Right), shiftPrevScreen)
-          , ((m__, xK_Right), prevScreen)
+#else
+          , ((m__, xK_Right), nextScreen)
+          , ((m__, xK_Left ), prevScreen)
+          , ((ms_, xK_Right), shiftNextScreen)
+          , ((ms_, xK_Left ), shiftPrevScreen)
+#endif
           , ((m__, xK_y    ), toggleWS' ["NSP"])
           , ((m__, xK_a    ), toggleWS' ["NSP"])]
         -- combineTwoKBs =
@@ -213,18 +221,26 @@ myKeys conf@XConfig {XMonad.modMask = modm} =
         , ((msc, xK_F12), "poweroff")]
     miscKBs =
       [ ((const 0,   0x1008ffa9), spawn "synclient TouchpadOff=$(synclient -l | grep -c 'TouchpadOff.*=.*0')")
+      , ((m__, xK_s      ), spawn "find-cursor")
       , ((ms_, xK_s      ), spawn "xdotool mousemove 0 0; synclient TouchpadOff=$(synclient -l | grep -c 'TouchpadOff.*=.*0')")
-      , ((ms_, xK_z      ), spawn "~/bin/myautosetup.pl --primOutNr=1") -- auto
-      , ((msc, xK_z      ), spawn "~/bin/myautosetup.pl --rotate=left --primOutNr=1") -- auto
-      -- , ((ms_, xK_y      ), spawn "slimlock") -- screenlocker
+      , ((m__, xK_z      ), spawn "~/bin/myautosetup.pl --onlyIfChanged")
+      , ((ms_, xK_z      ), spawn "~/bin/myautosetup.pl")
+      , ((msc, xK_z      ), spawn "~/bin/myautosetup.pl --rotate=left --primOutNr=1")
+#if 1
       , ((ms_, xK_y      ), spawn "xset s activate") -- screenlocker
+#else
+      , ((ms_, xK_y      ), spawn "slimlock") -- screenlocker
+#endif
 
+#if 1
       -- invert Colors (does not work with retdshift)
-      -- alternative command:  "xcalib -i -a"
       , ((m__,  xK_Home   ), spawn "xrandr-invert-colors")
+#else
+      , ((m__,  xK_Home   ), spawn "xcalib -i -a")
+#endif
 
-      , ((m__,  xK_Print  ), spawn "scrot ~/screen_%Y-%m-%d_%H-%M-%S.png -d 1") -- screenshot
-      , ((ms_,  xK_Print  ), spawn "~/bin/screenshot.sh") -- or: "bash -c \"import -frame ~/screen_`date +%Y-%m-%d_%H-%M-%S`.png\"")
+      , ((m__,  xK_Print  ), spawn "~/bin/screenshot.sh") -- or: "bash -c \"import -frame ~/screen_`date +%Y-%m-%d_%H-%M-%S`.png\"")
+      , ((ms_,  xK_Print  ), spawn "scrot ~/screen_%Y-%m-%d_%H-%M-%S.png -d 1") -- screenshot
 
       -- keyboard layouts
       , ((m__,  xK_F2     ), spawn "feh ~/.xmonad/neo/neo_Ebenen_1_2_3_4.png")
@@ -232,16 +248,25 @@ myKeys conf@XConfig {XMonad.modMask = modm} =
       ++ volumeControlls
       where
         volumeControlls =
-          map (\(k,v) -> ((const 0, k), spawn v))
-            [ (0x1008ff12, "amixer -q set Master toggle")
-            , (0x1008ff11, "amixer -q set Master 6dB-")
-            , (0x1008ff13, "amixer -q set Master unmute 3dB+")]
-    -- mpdKBs =
-    --   [ ((m__, 0xfc), spawn "mpc -h mpd@192.168.178.26 --no-status prev")
-    --   , ((ms_, 0xfc), spawn "mpc -h mpd@192.168.178.26 --no-status volume -10")
-    --   , ((m__, 0xf6), spawn "mpc -h mpd@192.168.178.26 --no-status toggle")
-    --   , ((m__, 0xe4), spawn "mpc -h mpd@192.168.178.26 --no-status next")
-    --   , ((ms_, 0xe4), spawn "mpc -h mpd@192.168.178.26 --no-status volume +5")]
+#if 1
+-- pulseaudio
+          map (\(k,args) -> ((const 0, k)
+                         , runProcessWithInput "/home/mhuber/.xmonad/bin/mypamixer.sh" args ""
+                           >>= myDefaultPopup . ("V: " ++)
+                         ))
+            [ (0x1008ff12, ["mute"])
+            , (0x1008ff11, ["-10%"])
+            , (0x1008ff13, ["+10%"])]
+#else
+-- alsa
+          map (\(k,v) -> ((const 0, k)
+                         , runProcessWithInput "/home/mhuber/.xmonad/bin/myamixer.sh" v ""
+                           >>= myDefaultPopup
+                         ))
+            [ (0x1008ff12, ["toggle"])
+            , (0x1008ff11, ["6dB-"])
+            , (0x1008ff13, ["unmute","3dB+"])]
+#endif
     baclightControlKBs =
       [((m__, xK_F1), spawnSelected def [ "xbacklight =50"
                                         , "xbacklight =25"
@@ -271,52 +296,45 @@ myMouseBindings XConfig {XMonad.modMask = modm} = M.fromList
 
 ------------------------------------------------------------------------
 -- Layouts / workspaces:
-myWorkspaces = map show [1..7] ++ ("web" : map show [9..15]) ++ ["vbox", "media"]
+myWorkspaces = map show [1..7] ++ ("web" : map show [9..10]) ++ ["vbox", "media"]
 
 myLayout = smartBorders $
            boringAuto $
            modWorkspaces [ "vbox", "media" ] (Full |||) $
            avoidStrutsOn[U,D] $
+           named "" $
+           withIM (1%7) (Title "Tabs Outliner") $
            mkToggle (single FULL) $
            mkToggle (single MIRROR) $
-           full ||| dtb ||| tiled
-           -- (IfMax 1 full  (full ||| (IfMax 2 tiled (dtb ||| tiled))))
+           IfMax 1 full  (IfMax 2 tiled (tiled ||| dtb) ||| full)
   where
-    -- full1080 = named "fixed=" $
-    --            ifWider 1920 (gaps [(L,320),(U,180),(R,320),(D,180)] Full) Full
     baseSpacing = 10
     wqhdSpacing = 20
     wqhdGapping = (2560 - 1920) `div` 2 - wqhdSpacing + baseSpacing
-    mySpacing l = ifWider 1920 (spacing wqhdSpacing l)
-                               (ifWider 1919 (spacing baseSpacing l) l)
+    myUprightGapping l = ifWider 1440 l $
+                         ifWider 1439 (gaps [(U,wqhdGapping), (D,wqhdGapping)] l) l
+    myUprightMirroring l = ifWider 1440 l $
+                           ifWider 1439 (Mirror l) l
+    mySpacing l = ifWider 1920 (spacing wqhdSpacing l) $
+                  ifWider 1919 (spacing baseSpacing l) $
+                  ifWider 1439 (spacing wqhdSpacing l)
+                  l
     full      = named "=" $
                 mySpacing $
-                ifWider 1920 (gaps [(L,wqhdGapping), (R,wqhdGapping)] Full) Full
+                ifWider 1920 (gaps [(L,wqhdGapping), (R,wqhdGapping)] Full) $
+                myUprightGapping Full
     tiled     = named " " $
                 minimize $
-                -- addTabs shrinkText myTab $
                 mySpacing $
-                -- subLayout [] Simplest $
+                myUprightGapping $
+                myUprightMirroring $
                 ResizableTall 1 (3/100) (1/2) []
-    -- dtb     = named "%" $
-    --     mySpacing $
-    --     mastered (1/100) (1/2) $
-    --     gaps [(D,10)] $
-    --     tabbedBottom shrinkText myTab
     dtb       = named "%" $
                 minimize $
                 mySpacing $
+                myUprightGapping $
+                myUprightMirroring $
                 TwoPane (3/100) (1/2)
-    --options:
-    -- myTab     = def { activeColor         = "black"
-    --                 , inactiveColor       = "black"
-    --                 , urgentColor         = "yellow"
-    --                 , activeBorderColor   = "orange"
-    --                 , inactiveBorderColor = "#333333"
-    --                 , urgentBorderColor   = "black"
-    --                 , activeTextColor     = "orange"
-    --                 , inactiveTextColor   = "#666666"
-    --                 , decoHeight          = 14 }
 
 ------------------------------------------------------------------------
 -- Window rules:
@@ -334,15 +352,18 @@ myLayout = smartBorders $
 --
 myManageHook = (composeAll (foldMap (\(a,cs) -> map (\c -> className =? c --> a) cs)
                              [ (doCenterFloat, ["Xmessage"
-                                               ,"qemu"
-                                               ,"qemu-system-x86_64"
+                                               ,"qemu","qemu-system-x86_64"
                                                ,"feh"
-                                               ,"Zenity"])
+                                               ,"Zenity"
+                                               ,"pinentry","Pinentry"
+                                               ,"pavucontrol","Pavucontrol"
+                                               ,"zoom"])
                              , (doFloat, ["MPlayer"
                                          ,"Onboard"])
-                             , (doShift "web", ["Firefox"]) --["Chromium" ,"chromium-browser" ,"Firefox"]
-                             , (doShift "vbox", ["Virtualbox"
-                                                ,"VirtualBox"])
+                             , (doShift "web", ["Firefox"
+                                               ,"Chromium","chromium-browser"])
+                             , (doShift "10", ["franz","Franz"])
+                             , (doShift "vbox", ["Virtualbox","VirtualBox"])
                              , (doShift "media", ["Steam"])
                              , (doIgnore, ["desktop_window"
                                           ,"kdesktop"]) ]))
@@ -364,16 +385,28 @@ myEventHook = fullscreenEventHook
 myStartupHook :: X ()
 myStartupHook = do
   setWMName "LG3D"
-  spawn "killall unclutter; unclutter"
+  spawn "pkill unclutter; unclutter"
   spawn "xset s 900"
   spawn "xss-lock -- slimlock"
+
+------------------------------------------------------------------------
+-- Log hook:
+myLogHook xmproc = let
+  myXmobarPP = def { ppOutput  = hPutStrLn xmproc . shortenStatus
+                   , ppCurrent = xmobarColor maincolor "" . wrap "<" ">"
+                   , ppSort    = scratchpadPPSort
+                   , ppTitle   = (" " ++) . xmobarColor maincolor ""
+                   , ppVisible = xmobarColor maincolor ""
+                   }
+  in dynamicLogWithPP myXmobarPP
+     >> updatePointer (0.5,0.5) (0.5,0.5)
 
 ------------------------------------------------------------------------
 -- General
 
 maincolor = "#ee9a00" :: String
 myConfig xmproc = withUrgencyHook myUrgencyHook $
-  def { terminal             = "urxvtc"
+  def { terminal           = "urxvtc"
       , focusFollowsMouse  = False -- see: focusFollow
       , borderWidth        = 3
       -- , modMask            = mod4Mask
@@ -387,13 +420,7 @@ myConfig xmproc = withUrgencyHook myUrgencyHook $
       , manageHook         = myManageHook
       , handleEventHook    = myEventHook
       , startupHook        = myStartupHook
-      , logHook            = dynamicLogWithPP xmobarPP
-                             { ppOutput  = hPutStrLn xmproc . shortenStatus
-                             , ppCurrent = xmobarColor maincolor "" . wrap "<" ">"
-                             , ppSort    = scratchpadPPSort
-                             , ppTitle   = (" " ++) . xmobarColor maincolor ""
-                             , ppVisible = xmobarColor maincolor ""
-                             } >> updatePointer (0.5,0.5) (0.5,0.5)
+      , logHook            = myLogHook xmproc
       }
 
 ------------------------------------------------------------------------

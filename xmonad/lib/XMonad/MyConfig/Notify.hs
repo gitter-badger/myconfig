@@ -1,11 +1,12 @@
 module XMonad.MyConfig.Notify
-       ( myUrgencyHook, popupCurDesktop )
+       ( myUrgencyHook, popupCurDesktop, myDefaultPopup )
        where
 -- needs `notify-osd` and `libnotify`
 -- See: https://pbrisbin.com/posts/using_notify_osd_for_xmonad_notifications/
 --  and https://wiki.haskell.org/Xmonad/Config_archive/doitan%27s_xmonad.hs
 --  and https://github.com/lierdakil/xmonad-config/blob/master/Local/Popup.hs
 
+import Data.Char (isSpace)
 import           XMonad
 import XMonad.Util.Dzen
 -- import XMonad.Config.Prime.Monadic
@@ -13,6 +14,7 @@ import XMonad.Hooks.UrgencyHook
 import XMonad.Util.NamedWindows
 import qualified XMonad.StackSet as W
 import XMonad.Hooks.ServerMode
+import Control.Applicative
 
 myUrgencyHook = MyUrgencyHook (myNotify 2)
 
@@ -35,13 +37,19 @@ myNotify t = dzenConfig pc
 
 myPopup :: Int -> Rational -> String -> X ()
 myPopup width t = dzenConfig pc
-  where
-    pc = onCurr (hCenter width) >=> timeout t >=> mkFont 80
+    where
+      pc = onCurr (hCenter width) >=> timeout t >=> mkFont 80
+
+myDefaultPopup :: String -> X ()
+myDefaultPopup = myPopup 400 0.5
 
 popupCurDesktop :: X()
-popupCurDesktop = do
-  curName <- fmap W.currentTag $ gets windowset
-  myPopup 400 0.5 curName
+popupCurDesktop = (W.currentTag <$> gets windowset) >>= myDefaultPopup . ("ws: " ++)
+
+-- popupCmdOut :: String -> [String] -> X()
+-- popupCmdOut cmd args = do
+--   cmdOut <- liftIO (readProcess cmd args [])
+--   myPopup 400 0.5 cmdOut
 
 -- popupConfig :: Prime
 -- popupConfig = do

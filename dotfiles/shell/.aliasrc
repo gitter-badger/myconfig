@@ -4,6 +4,26 @@
 if [ $__HOME_ALIASRC_SOURCED ]; then return; fi
 __HOME_ALIASRC_SOURCED=1
 
+have() { type "$1" &> /dev/null; }
+confirm () {
+    # call with a prompt string or use a default
+    if [ -n "$BASH_VERSION" ]; then
+        read -r -p "${1:-Are you sure? [y/N]} " response
+    elif [ -n "$ZSH_VERSION" ]; then
+        echo "${1:-Are you sure? [y/N]} "
+        read response
+    fi
+    case $response in
+        [yY][eE][sS]|[yY])
+            true
+            ;;
+        *)
+            false
+            ;;
+    esac
+}
+
+
 # needs:
 # vim, tmux, sudo, mutt
 
@@ -11,11 +31,17 @@ alias asdf="setxkbmap -layout de,de -variant neo,nodeadkeys -option grp:shifts_t
 
 alias vi="/var/run/current-system/sw/bin/vim"
 
-if [ -x "$HOME/bin/emc" ]; then
-  alias vim="$HOME/bin/emc -forceTerminal"
+if [ -x "$HOME/bin/ec" ]; then
+  alias vim="$HOME/bin/ec -t"
+  alias emacs="$HOME/bin/ec"
 else
   alias vim="emacsclient -t"
+  emacs () {
+    command emacs "$@" &disown
+  }
 fi
+
+alias magit='ec -e "(magit-status \"$(pwd)\")"'
 alias pgp="gpg" #Typo
 alias vime="vim -u ~/.vimencrypt -x "
 alias gvime="gvim -u ~/.vimencrypt -x "
@@ -26,7 +52,7 @@ alias tmux="tmux -2"
 alias tmx="tmux attach-session || tmux"
 ntmx(){
   # name sessions automatically, depending on the current dir
-  n=`echo $(basename "$(pwd)") | sed "s/\./_/g"`
+  n=$(echo $(basename "$(pwd)") | sed "s/\./_/g")
   tmux attach-session -t "$n" || tmux new -s "$n"
 }
 if test -z $TMUX && [[ $TERM != "screen" ]]; then
@@ -50,8 +76,12 @@ man(){
         || which $@
 }
 
-grepr() { grep -rns --color=always "$@" | grep -v Binärdatei 2>/dev/null; }
-grepri() { grepr -i "$@" }
+have ag && {
+  alias grepr="ag"
+} || {
+  grepr() { grep -rns --color=always "$@" | grep -v Binärdatei 2>/dev/null; }
+  grepri() { grepr -i "$@" }
+}
 greprL() { grepr "$@" | less -R; }
 grepf() {
     # stolen from: https://www.manthanhd.com/2016/01/15/waiting-for-tomcat-to-start-up-in-a-script/
@@ -73,46 +103,6 @@ grepf() {
     rm $FIFO
 }
 
-have() { type "$1" &> /dev/null; }
-confirm () {
-    # call with a prompt string or use a default
-    if [ -n "$BASH_VERSION" ]; then
-        read -r -p "${1:-Are you sure? [y/N]} " response
-    elif [ -n "$ZSH_VERSION" ]; then
-        echo "${1:-Are you sure? [y/N]} "
-        read response
-    fi
-    case $response in
-        [yY][eE][sS]|[yY])
-            true
-            ;;
-        *)
-            false
-            ;;
-    esac
-}
-
-alias gitDiff="git diff HEAD^ HEAD"
-
-# zathura() {
-#   command zathura "$@" &disown
-# }
-emacs(){
-  fork="true"
-  for var in "$@"; do
-    if [[ "$var" = "-nw" ]]; then
-      fork="false"
-      break
-    fi
-  done
-  if [[ "$fork" = "true" ]]; then
-    command emacs "$@" &disown
-  else
-    command emacs "$@"
-  fi
-}
-alias e="emacs"
-
 alias httptunnel="ssh -ND localhost:9567 vserver"
 
 alias g="git"
@@ -122,19 +112,14 @@ alias t="tig"
 alias tu='tig HEAD @{upstream}'
 alias ta="task"
 alias d="docker"
-# g() {
-#   if [  $# -eq 0 ]; then
-#     git fetch --all && git status
-#   else
-#     git $@
-#   fi
-# }
-
-file-roller() {
-  command file-roller "$@" &disown
-}
+alias dc="docker-compose"
 
 alias uncolor='sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g"'
+adddate() { # see http://serverfault.com/questions/310098/how-to-add-a-timestamp-to-bash-script-log
+    while IFS= read -r line; do
+        echo "$(date) $line"
+    done
+}
 
 #--------------------------------------------------------------------
 #   file specific
@@ -159,10 +144,6 @@ alias l='ls -CF'
 alias l.='ls -dF .[a-zA-Z0-9]*' #only show dotfiles
 lgrep() { ls -alF | egrep "$@"; }
 
-#keep track of folders
-#alias cd="pushd"
-#alias bd="popd"
-
 cdStack() {
   DEFAULT_LIMIT=19
   LIMIT=${1:-$DEFAULT_LIMIT}
@@ -185,7 +166,10 @@ cdStack() {
 }
 
 cd() { #Automatically do an ls after each cd
-    builtin cd "$@" && ls
+    builtin cd "$@" && \
+        if [[ $(ls -1 | wc -l) -lt $(tput lines) ]]; then
+            ls
+        fi
 }
 
 alias cd..="cd .."
@@ -196,8 +180,15 @@ mkcd() { #make dir and enter it
   cd "$1"
 }
 
-cdtmp() {
+cdtemp() {
   cd $(mktemp -d)
+  pwd
+}
+
+cptemp() {
+  f=$(realpath $1)
+  cd $(mktemp -d)
+  cp $f ./
   pwd
 }
 
@@ -216,41 +207,32 @@ alias pkill9="pkill --signal 9"
 # disk usage for humans
 duh() { test $# -eq 0 && set -- *; du -sch "$@" | sort -h; }
 
-alias ducks='du -cs * |sort -rn |head -11'
-alias ducksall='du -cs * |sort -rn'
-alias ducksALL='du -c --max-depth=1 ./ |sort -rn'
-alias hducks='du -cs .??* |sort -rn |head -11'
-alias hducksall='du -cs .??* |sort -rn'
+alias ducks='du -csh * |sort -rh |head -11'
+alias ducksall='du -csh * |sort -rh'
+alias ducksALL='du -ch --max-depth=1 ./ |sort -rh'
+alias hducks='du -csh .??* |sort -rh |head -11'
+alias hducksall='du -csh .??* |sort -rh'
 
-#have ranger && {
-  ranger-cd() {
-    tempfile='/tmp/chosendir'
-    ranger --choosedir="$tempfile" "${@:-$(pwd)}"
-    test -f "$tempfile" &&
-    if [ "$(cat -- "$tempfile")" != "$(echo -n `pwd`)" ]; then
-      cd -- "$(cat "$tempfile")"
-    fi
-    rm -f -- "$tempfile"
-  }
-  if [ -n "$BASH_VERSION" ]; then
-    bind '"\C-o":" ranger-cd\C-m"'
-  elif [ -n "$ZSH_VERSION" ]; then
-    bindkey -s '^o' '^qranger-cd\n'
+ranger-cd() {
+  tempfile='/tmp/chosendir'
+  ranger --choosedir="$tempfile" "${@:-$(pwd)}"
+  test -f "$tempfile" &&
+  if [ "$(cat -- "$tempfile")" != "$(echo -n `pwd`)" ]; then
+    cd -- "$(cat "$tempfile")"
   fi
-#}
-
-#Fix permissions
-myPermfix() {
-  for dir in "$@"; do
-    find "$dir" -type d -exec chmod 755 {} \;
-    find "$dir" -type f -exec chmod 644 {} \;
-  done
+  rm -f -- "$tempfile"
 }
+if [ -n "$BASH_VERSION" ]; then
+  bind '"\C-o":" ranger-cd\C-m"'
+elif [ -n "$ZSH_VERSION" ]; then
+  bindkey -s '^o' '^qranger-cd\n'
+fi
 
 # Find a file/dir/file&dir with a pattern in name:
 ff() { find . -not -iwholename '*.svn*' -not -iwholename '*.git*' -type f -iname '*'$*'*' -ls 2>/dev/null ; }
 ffd() { find . -not -iwholename '*.svn*' -not -iwholename '*.git*' -type d -iname '*'$*'*' -ls 2>/dev/null ; }
 ffa() { find . -not -iwholename '*.svn*' -not -iwholename '*.git*' -iname '*'$*'*' -ls 2>/dev/null ; }
+ffg() { find . -type f -print0 | xargs -0 grep -lI "$*" ; }
 
 # Find a file with pattern $1 in name and Execute $2 on it:
 fe() { find . -not -iwholename '*.svn*' -not -iwholename '*.git*' -type f -iname '*'${1:-}'*' -exec ${2:-file} {} \; ; }
@@ -315,6 +297,9 @@ exl() {
         # *.7z) 7z x $file ;;
         # *.jar) unzip $file ;;
         # *.deb) ar xv $file ;;
+        *.jar) unzip -l $file ;;
+        *.war) unzip -l $file ;;
+        *.ear) unzip -l $file ;;
         *)
           echo "'$file' cannot be listed via exl(), more info:"
           file $file
@@ -334,33 +319,30 @@ countFilesByTypes() {
     | sort  -rn
 }
 
+finddupes() {
+  # from: http://www.commandlinefu.com/commands/view/3555/find-duplicate-files-based-on-size-first-then-md5-hash 
+  find -not -empty -type f -printf "%s\n" \
+    | sort -rn \
+    | uniq -d \
+    | xargs -I{} -n1 find -type f -size {}c -print0 \
+    | xargs -0 md5sum \
+    | sort \
+    | uniq -w32 --all-repeated=separatae \
+    | cut -d' ' -f2-
+}
+
 #-------------------------------------------------------------------}}}
 #   system control
 #-------------------------------------------------------------------{{{
 
-# alias reboot="systemctl reboot"
-# alias poweroff="systemctl poweroff"
-# alias halt="systemctl poweroff"
-# alias suspend="systemctl suspend"
+alias reboot="systemctl reboot"
+alias poweroff="systemctl poweroff"
+alias halt="systemctl poweroff"
+alias suspend="systemctl suspend"
 
-alias btsyncStart="sudo btsync --config ~/.config/btsync/btsync.conf"
-
-# for hotswaping SATA or eSATA drives
-# scan for new sata devices (as root):
-mysatascan() { su -c "echo \"0 0 0\" >/sys/class/scsi_host/host1/scan"; }
-# remove sata devices:
-#       hdparm -Y /dev/sdX
-
-myusbsusendoff() {
-  su -c "for i in /sys/bus/usb/devices/*/power/control; do echo on > \$i; done"
-}
-
-alias dmesgwatch='watch "dmesg |tail -15"'
-alias mydmesg='watch "dmesg |tail -15"' #the same
-
-alias clamscan="sudo clamscan --recursive --infected --bell"
-alias clamclean="sudo clamscan --recursive --infected --bell --remove"
-alias clamupd="sudo freshclam"
+# alias clamscan="sudo clamscan --recursive --infected --bell"
+# alias clamclean="sudo clamscan --recursive --infected --bell --remove"
+# alias clamupd="sudo freshclam"
 
 # will show a list of all the currently loaded modules and all of their parameters
 # should be run as root
@@ -415,23 +397,19 @@ my_power_settings() {
   ';
 }
 
-alias repairDevNull="sudo rm -f /dev/null; sudo mknod -m 666 /dev/null c 1 3"
+# alias repairDevNull="sudo rm -f /dev/null; sudo mknod -m 666 /dev/null c 1 3"
+
+alias dmesg="dmesg -T"
 
 #-------------------------------------------------------------------}}}
 #  docker 
 #-------------------------------------------------------------------{{{
 
-dclean(){
-    # remove all dangling volumes
-    docker volume ls -qf dangling=true |xargs -r docker volume rm
-
-    confirm "also do dcclean?" && dcclean
-    confirm "also do diclean?" && diclean
-}
 dcclean(){
     # call `dclean -a` to clean all containers
     docker ps -q $1 |xargs --no-run-if-empty docker rm
 }
+
 diclean(){
     # call `dclean -a` to clean all images
     remAll() {
@@ -443,6 +421,15 @@ diclean(){
 
     [[ "$1" == "-a" ]] && remAll || remUntagged
 }
+
+dclean(){
+    # remove all dangling volumes
+    docker volume ls -qf dangling=true |xargs -r docker volume rm
+
+    confirm "also do dcclean?" && dcclean $@
+    confirm "also do diclean?" && diclean $@
+}
+
 dssh(){
     containerID=""
     [ $1 ] && {
@@ -481,10 +468,17 @@ dstop(){
 }
 
 #-------------------------------------------------------------------}}}
-#   multimedia
+#  vagrant
 #-------------------------------------------------------------------{{{
 
-alias equalizer="alsamixer -D equal"
+alias vup="vagrant up"
+alias vreload="vagrant reload"
+alias vhalt="vagrant halt"
+alias vssh="vagrant ssh"
+
+#-------------------------------------------------------------------}}}
+#   multimedia
+#-------------------------------------------------------------------{{{
 
 myStopScreensaver(){
   # needs xdotool
@@ -494,34 +488,11 @@ myStopScreensaver(){
   done
 }
 
-incoChrome(){
-  postfix=$(date +%s | sha256sum | base64 | head -c 32 ; echo)
-  mkdir -p "/tmp/incoChrome_$postfix" && \
-      chromium --incognito \
-               --user-data-dir="/tmp/incoChrome_$postfix" &disown
-}
-
-incoTorChrome(){
-  sudo systemctl start tor.service && {
-    postfix=$(date +%s | sha256sum | base64 | head -c 32 ; echo)
-    mkdir -p "/tmp/incoChrome_$postfix" && \
-        /usr/bin/chromium --incognito \
-                          --user-data-dir="/tmp/incoChrome_$postfix" \
-                          --proxy-server="socks://localhost:9050" &disown
-  }
-}
-
-alias mplayerampl="mplayer -af volume=10.1:0"
 mdump() { mplayer -dumpstream "${1}" -dumpfile ${2}.mp4; }
 mdir() {
   mplayer -shuffle -playlist \
     <(find "$PWD/$1" -type f -iregex ".*/.*\.\(wma\|mp3\|acc\|ogg\|flac\)")
 }
-
-# download from youtube
-alias ccl="cclive -s best"
-
-starWars() { telnet towel.blinkenlights.nl; }
 
 #rename all images
 #alias myrenameAllImages="jhead -autorot -nf%y%m%d-%f **/*.jpg"
@@ -530,33 +501,15 @@ alias myrenameImg="jhead -autorot -nf%y%m%d-%f"
 geeqie() { command geeqie "$@" & }
 rawtherapee() { command rawtherapee "$@" & }
 
-mpcFade() {
-  t=$(($1 * 60))
-  vol=`mpc -h $HOST | grep "volume" | awk '{print $2}'`
-  vol=${vol%\%}
-  for (( i = 0; i < $vol; i++ )); do
-    mpc -h $MPD_HOST --no-status volume $(($vol - $i))
-    echo $(($vol - $i))
-    sleep $(($t / $vol))
-  done
-  mpc -h $MPD_HOST --no-status pause
-  sleep 2
-  mpc -h $MPD_HOST --no-status volume $vol
-}
-
 #-------------------------------------------------------------------}}}
 #   documente / printing
 #-------------------------------------------------------------------{{{
 
-[[ -f ~/bin/univOpWrap ]] && alias p="~/bin/univOpWrap -r -f \".djvu:/usr/bin/zathura /usr/bin/llpp\""
 zathura() {
   command zathura "$@" &disown
 }
 llpp() {
   command llpp "$@" &disown
-}
-gnumeric() {
-  command gnumeric "$@" &disown
 }
 
 #   printing
@@ -620,39 +573,28 @@ myPdfreducesize() {
 #   LaTeX
 
 mylatexmk(){
-  # TODO: in work
-  [[ -z $TMUX ]] || {
-    SESSION=$(tmux list-panes -F "#S")
-    MAIN=$(grep -l '\\documentclass' *tex)
-    tmux send-keys \
-      "latexmk -pdf -synctex=1 -outdir=\".latexmk_files\" -pvc $MAIN" 'C-m'
-    tmux split-window -t $SESSION:1 -h
-    tmux send-keys "vim --servername $(basename $(dirname $MAIN))" 'C-m'
-  }
+    # TODO: in work
+    [[ -z $TMUX ]] || {
+        SESSION=$(tmux list-panes -F "#S")
+        MAIN=$(grep -l '\\documentclass' *tex)
+        tmux send-keys \
+             "latexmk -pdf -synctex=1 -outdir=\".latexmk_files\" -pvc $MAIN" 'C-m'
+        tmux split-window -t $SESSION:1 -h
+        tmux send-keys "vim --servername $(basename $(dirname $MAIN))" 'C-m'
+    }
 }
 
 mylualatexmk(){
-  grep -l '\\documentclass' *tex | \
-    xargs latexmk -pdflatex=lualatex -pdf -synctex=1 -outdir=".lualatexmk_files" -pvc
+    grep -l '\\documentclass' *tex | \
+        xargs latexmk -pdflatex=lualatex -pdf -synctex=1 -outdir=".lualatexmk_files" -pvc
 }
 
 myxelatexmk(){
-  grep -l '\\documentclass' *tex | \
-    xargs latexmk -pdflatex=xelatex -pdf -synctex=1 -outdir=".xelatexmk_files" -pvc
+    grep -l '\\documentclass' *tex | \
+        xargs latexmk -pdflatex=xelatex -pdf -synctex=1 -outdir=".xelatexmk_files" -pvc
 }
 
 alias mtw="myTexWrapper.sh"
-
-#-------------------------------------------------------------------}}}
-#   Mathe
-#-------------------------------------------------------------------{{{
-
-alias mymatlab="~/matlab/bin/matlab -nodisplay -nosplash -noFigureWindows ./"
-mymatlabRun(){
-  ~/matlab/bin/matlab -nodisplay -nosplash -noFigureWindows -r "$@"
-}
-alias mymatlabGUI="~/matlab/bin/matlab -desktop -nosplash"
-alias mymatlabRunFile="~/matlab/bin/matlab -nojvm -nodisplay -nosplash < "
 
 #-------------------------------------------------------------------}}}
 #   package management
@@ -665,7 +607,11 @@ have nix-env && {
   alias nix-zsh="nix-shell -p zsh --run zsh"
   alias nixTest="NIXPKGS_ALLOW_UNFREE=1 nix-shell --run zsh -p"
   nixRun() {
+    if [ "$#" -eq "2" ]; then
+      NIXPKGS_ALLOW_UNFREE=1 nix-shell -p "$1" --command "$2"
+    else
       NIXPKGS_ALLOW_UNFREE=1 nix-shell -p "$1" --command "$1"
+    fi
   }
   alias nixColGarbage="nix-collect-garbage -d --delete-older-than 7d"
   alias nixse="nix-env -qaP | grep -i"
@@ -678,6 +624,7 @@ have nix-env && {
   }
   alias nixlist="nix-env -qa \*"
 
+  alias nixrem="nix-env --uninstall"
 
   alias nix-shell-unfree="NIXPKGS_ALLOW_UNFREE=1 nix-shell"
 
@@ -727,16 +674,6 @@ have pacman && {
   alias pacloc='pacman -Qi'
   alias paclocs='pacman -Qs'
 
-  # pacupg(){
-  #   if (( RANDOM % 2 )); then # fast upg
-  #     sudo pacman -Syu
-  #   else # long upg
-  #     packer -Syu
-  #     # nixupg
-  #   fi
-  #   echo
-  #   myRemOrphans
-  # }
   have nix-env && {
       alias upg='pacupg && nixupg'
   } || {
@@ -776,6 +713,9 @@ alias aws="NIXPKGS_ALLOW_UNFREE=1 nix-shell -p 'aws' 'ec2_api_tools'"
 #   some networking
 #-------------------------------------------------------------------{{{
 
+alias wwan="sudo systemctl start ModemManager.service && sudo watch -n 1 systemctl status ModemManager.service; sudo nmtui"
+alias wwan-f="sudo systemctl restart ModemManager.service && sudo watch -n 1 systemctl status ModemManager.service; sudo nmtui"
+
 startphp() { php -S 127.0.0.1:8080; }
 mydhcp() {
   sudo ip link set $1 up
@@ -800,20 +740,8 @@ mynmap() {
     nmap -sn "${1:-192.168.178.0}/${2:-24}" -oG -
 }
 
-# watch network:  sudo iptraf-ng
-#                 sudo iftop
-
 # Get IP (call with myip)
 myip() { myip=`elinks -dump http://checkip.dyndns.org:8245/`; echo "${myip}"; }
-
-## shortcut  for iptables and pass it via sudo#
-#alias ipt='sudo /sbin/iptables'
-## display all rules #
-#alias iptlist='sudo /sbin/iptables -L -n -v --line-numbers'
-#alias iptlistin='sudo /sbin/iptables -L INPUT -n -v --line-numbers'
-#alias iptlistout='sudo /sbin/iptables -L OUTPUT -n -v --line-numbers'
-#alias iptlistfw='sudo /sbin/iptables -L FORWARD -n -v --line-numbers'
-#alias firewall=iptlist
 
 myiscsiRoutine() {
   # myiscsiRoutine UUID IP
@@ -839,93 +767,60 @@ getCert() {
 #   misc
 #-------------------------------------------------------------------{{{
 
-alias vbox="sudo modprobe vboxdrv && VirtualBox &disown"
+meld() {
+  command meld "$@" &disown
+}
+
+Franz() {
+  command Franz "$@" &disown
+}
+
+alias steam="NIXPKGS_ALLOW_UNFREE=1 nix-shell -p steam --command \"optirun steam\""
 
 touchpadtoggle(){
   xdotool mousemove 0 0
   synclient TouchpadOff=$(synclient -l | grep -c 'TouchpadOff.*=.*0')
 }
 
-# calc - simple calculator
-# usage: calc <equation>
-calc() { echo "$*" | bc -l; }
-# binär, dezimal, hexadezimal (binary, hex, ...)
-b2d(){ echo "ibase=2;            $@"|bc; }
-b2h(){ echo "ibase=2;  obase=16; $@"|bc; }
-b2o(){ echo "ibase=2;  obase=8;  $@"|bc; }
-d2b(){ echo "          obase=2;  $@"|bc; }
-d2h(){ echo "          obase=16; $@"|bc; }
-d2o(){ echo "          obase=8;  $@"|bc; }
-h2b(){ echo "ibase=16; obase=2;  $@"|bc; }
-h2d(){ echo "ibase=16;           $@"|bc; }
-h2o(){ echo "ibase=16; obase=8;  $@"|bc; }
-o2b(){ echo "ibase=8;  obase=2;  $@"|bc; }
-o2d(){ echo "ibase=8;            $@"|bc; }
-o2h(){ echo "ibase=8;  obase=16; $@"|bc; }
-
 hgrep() { history | egrep "$@"; }
 
 alias tes="myThesausrus.sh"
-dic(){
-  if [[ "$#" -eq 0 ]]; then
-    tput bold
-    tput setaf 6
-    while read line; do
-      if [[ "$line" == "" ]]; then
-        tput sgr0
-        return 0
-      fi
-      tput sgr0
-      w3m -dump "http://pocket.dict.cc?s=\"$line\"" \
-        | sed -r -e '/^([ ]{5,}.*)$/d' -e '1,2d' -e '/^$/d' -e '/^\[/d' \
-        | head -n $(( $(tput lines) - 3 ))
-      echo "=================================================================="
-      tput bold
-      tput setaf 6
-    done
-    tput sgr0
-  else
-    w3m -dump "http://pocket.dict.cc?s=\"$*\"" \
-      | sed -r -e '/^([ ]{5,}.*)$/d' -e '1,2d' -e '/^$/d' -e '/^\[/d' \
-      | less
-      # | head -n $(( $(tput lines) - 3 ))
-  fi
-}
+alias dic="dic.sh"
 
-#have tmux && {
-  run_under_tmux() {
-    # Run $1 under session or attach if such session already exist.
-    # $2 is optional path, if no specified, will use $1 from $PATH.
-    # If you need to pass extra variables, use $2 for it as in example below..
-    # Example usage:
-    #  torrent() { run_under_tmux 'rtorrent' '/usr/local/rtorrent-git/bin/rtorrent'; }
-    #  mutt() { run_under_tmux 'mutt'; }
-    #  irc() { run_under_tmux 'irssi' "TERM='screen' command irssi"; }
+# #have tmux && {
+#   run_under_tmux() {
+#     # Run $1 under session or attach if such session already exist.
+#     # $2 is optional path, if no specified, will use $1 from $PATH.
+#     # If you need to pass extra variables, use $2 for it as in example below..
+#     # Example usage:
+#     #  torrent() { run_under_tmux 'rtorrent' '/usr/local/rtorrent-git/bin/rtorrent'; }
+#     #  mutt() { run_under_tmux 'mutt'; }
+#     #  irc() { run_under_tmux 'irssi' "TERM='screen' command irssi"; }
 
-    # There is a bug in linux's libevent...
-    # export EVENT_NOEPOLL=1
+#     # There is a bug in linux's libevent...
+#     # export EVENT_NOEPOLL=1
 
-    command -v tmux >/dev/null 2>&1 || return 1
+#     command -v tmux >/dev/null 2>&1 || return 1
 
-    if [ -z "$1" ]; then return 1; fi
-    local name="$1"
-    if [ -n "$2" ]; then
-      local file_path="$2"
-    else
-      local file_path="command ${name}"
-    fi
+#     if [ -z "$1" ]; then return 1; fi
+#     local name="$1"
+#     if [ -n "$2" ]; then
+#       local file_path="$2"
+#     else
+#       local file_path="command ${name}"
+#     fi
 
-    if tmux has-session -t "${name}" 2>/dev/null; then
-      tmux attach -d -t "${name}"
-    else
-      tmux new-session -s "${name}" "${file_path}" \; set-option status \; set set-titles-string "${name} (tmux@${HOST})"
-    fi
-  }
-  # have mutt && mutt() { run_under_tmux 'mutt'; }
-  # have ncmpcpp && ncmpcpp() { run_under_tmux 'ncmpcpp'; }
-  #have finch && finch() { run_under_tmux 'finch'; }
-  #have ekg2 && ekg2() { run_under_tmux 'ekg2'; }
-#}
+#     if tmux has-session -t "${name}" 2>/dev/null; then
+#       tmux attach -d -t "${name}"
+#     else
+#       tmux new-session -s "${name}" "${file_path}" \; set-option status \; set set-titles-string "${name} (tmux@${HOST})"
+#     fi
+#   }
+#   # have mutt && mutt() { run_under_tmux 'mutt'; }
+#   # have ncmpcpp && ncmpcpp() { run_under_tmux 'ncmpcpp'; }
+#   #have finch && finch() { run_under_tmux 'finch'; }
+#   #have ekg2 && ekg2() { run_under_tmux 'ekg2'; }
+# #}
 
 myXnest() {
   Xnest :1 &
@@ -935,12 +830,6 @@ myXnest() {
 #-------------------------------------------------------------------}}}
 #   some functions
 #-------------------------------------------------------------------{{{
-
-adddate() { # see http://serverfault.com/questions/310098/how-to-add-a-timestamp-to-bash-script-log
-    while IFS= read -r line; do
-        echo "$(date) $line"
-    done
-}
 
 mycompTime() { #compare the speed of two ($1, $2) commands (loop $3 times)
   if [ $# -ne 3 ]; then return 1; fi
